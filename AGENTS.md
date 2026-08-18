@@ -11,7 +11,7 @@ The crate is split into a binary and a library, per the UI-independent-core-vs-p
 - `src/lib.rs` — UI-independent core logic
 - `src/main.rs` — CLI entry point / terminal presentation
 
-Both are currently stubs; no functionality has been implemented yet.
+`src/lib.rs` owns the read-only workspace sandbox (`workspace`) and the `list_directory`/`read_file` tools built on it (`tools`); both are private, not yet wired to an agent. `src/main.rs` remains a stub.
 
 ### Commands
 
