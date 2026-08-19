@@ -17,6 +17,12 @@ fn workspace_from_context(context: &ToolContext) -> Result<&Workspace, ToolExecu
         .ok_or_else(|| ToolExecutionError::other("workspace missing from tool context"))
 }
 
+/// Splits `WorkspaceError` into model-actionable failures (the model can retry
+/// with a corrected path) and host-only failures (`from_error`, not
+/// `other(err.to_string())`, so only stable kind-level feedback reaches the
+/// model). See docs/decisions/0005-tool-error-visibility.md — including its
+/// noted gap: the model-visible arms below still interpolate absolute
+/// workspace paths via `WorkspaceError`'s `Display` impl.
 fn map_workspace_error(err: WorkspaceError) -> ToolExecutionError {
     match err {
         WorkspaceError::EmptyPath

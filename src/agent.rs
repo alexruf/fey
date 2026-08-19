@@ -79,6 +79,11 @@ impl AgentSession {
         Ok(Self::with_model(completion_model, workspace))
     }
 
+    /// The injection seam that makes agent wiring testable without a network
+    /// call: `new` does all network-adjacent construction and delegates here,
+    /// so tests can substitute `rig::test_utils::MockCompletionModel` and
+    /// assert tool registration, `ToolContext` insertion, and reply
+    /// extraction. See docs/decisions/0006-ollama-only-injectable-model.md.
     fn with_model<M>(model: M, workspace: Workspace) -> Self
     where
         M: CompletionModel + 'static,

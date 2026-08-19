@@ -1,3 +1,7 @@
+//! CLI/runtime composition root: parses arguments, constructs `AgentSession`,
+//! builds an explicit Tokio runtime, and hands off to the binary-only `tui`
+//! module. Contains no view or agent-loop logic itself.
+
 mod tui;
 
 use clap::Parser;

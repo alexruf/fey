@@ -4,14 +4,11 @@
 
 ## Project Context
 
-`fey` is a minimal, terminal-native AI coding agent written in Rust. Read [README.md](README.md) for details.
+`fey` is a minimal, terminal-native AI coding agent written in Rust. Read [README.md](README.md) for usage.
 
-The crate is split into a binary and a library, per the UI-independent-core-vs-presentation rule:
+The crate is split into a library (`src/lib.rs`) and a binary (`src/main.rs`, `src/tui/`), per the UI-independent-core-vs-presentation rule; `src/lib.rs` re-exports only `AgentConfig`, `AgentError`, `AgentReply`, and `AgentSession`.
 
-- `src/lib.rs` — UI-independent core logic
-- `src/main.rs` — CLI entry point / terminal presentation
-
-`src/lib.rs` owns the read-only workspace sandbox (`workspace`), the `list_directory`/`read_file` tools built on it (`tools`), and the Ollama-backed `agent` module; it re-exports only `AgentConfig`, `AgentError`, `AgentReply`, and `AgentSession`. `src/main.rs` is the CLI/runtime composition root: it parses `Cli`, constructs `AgentSession`, builds an explicit `tokio::runtime::Runtime`, and runs the binary-only inline-viewport TUI under `src/tui/` (`mod.rs` event loop and worker, `app.rs` pure state, `view.rs` rendering) on the main thread outside that runtime.
+Before working on this codebase, read [`docs/`](docs/README.md) — start with [`docs/architecture.md`](docs/architecture.md) (boundary, request path, invariants) and `docs/decisions/` (ADRs: why things are shaped this way). [`docs/testing.md`](docs/testing.md) has the manual QA playbook; [`docs/roadmap.md`](docs/roadmap.md) has planned follow-ups.
 
 ### Commands
 
@@ -88,5 +85,7 @@ When choosing between approaches, prioritize in order:
 
 ### Documentation
 
-- After every change or new feature: check whether README.md, AGENTS.md, and any other affected docs still describe current behavior accurately; update what's stale, add what's missing
+- After every change or new feature: check whether README.md, AGENTS.md, `docs/architecture.md`, and any other affected docs still describe current behavior accurately; update what's stale, add what's missing
 - Treat outdated documentation as a defect, not an afterthought
+- **Exception: ADRs (`docs/decisions/`) are immutable historical records, not living documentation.** Never edit an accepted ADR to match a later change in behavior — write a new ADR that supersedes it and mark the original `Superseded by NNNN`. A change that alters an invariant in `docs/architecture.md` needs a new ADR explaining why, not just a doc edit.
+- **This file (AGENTS.md) is written for AI agents and stays dense and terse — that's correct for this file.** README.md and everything under `docs/` (including ADRs) are written for humans: write those as you'd explain the reasoning out loud to a colleague — plain sentences, lead with *why*, avoid arrow-chains and jargon-stacked parentheticals. Code identifiers and file paths are fine when they earn their place, but they shouldn't carry the explanation. If a paragraph needs re-reading twice to parse, rewrite it as prose before adding it.

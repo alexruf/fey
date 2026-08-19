@@ -15,11 +15,13 @@ cargo run --locked -- --model <tag>
 
 `--ollama-url` (or `OLLAMA_API_BASE_URL`) overrides the default `http://localhost:11434`.
 
-The launch directory is the read-only workspace: `fey` can list directories and read files inside
-it, but cannot create, modify, or delete anything, and cannot run shell commands.
+Whatever folder you run `fey` from becomes its workspace: it can look through files and folders
+inside it, but it can't create, edit, or delete anything, and it can't run shell commands.
 
-The UI is an inline viewport at the bottom of the terminal; finalized messages are written once
-into the terminal's own scrollback, so scrolling and copying use the terminal emulator itself.
+The interface stays out of your way: only the input line and a status line at the bottom are
+"live." Everything else — your messages and the model's replies — is written straight into your
+terminal's normal scrollback, so scrolling back and copying text just works the way it always
+does in your terminal.
 
 | Key | Action |
 | --- | --- |

@@ -10,9 +10,15 @@ readme = "README.md"
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive", "env"] }
+# scrolling-regions: without it, Terminal::insert_before falls back to clearing and
+# redrawing in chunks, which flickers for multi-line messages — and insert_before is
+# this design's primary output path (docs/decisions/0002). No test guards this.
 ratatui = { version = "0.30.2", features = ["scrolling-regions"] }
 rig = "0.42.0"
 thiserror = "2.0.20"
+# No "macros" feature: nothing uses #[tokio::main]. main.rs builds the Runtime
+# explicitly and runs the terminal loop on the main thread, outside it — see
+# docs/decisions/0003-sync-terminal-loop-explicit-runtime.md.
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync"] }
 unicode-width = "0.2.2"
 

@@ -25,6 +25,12 @@ pub(crate) fn run(runtime: &tokio::runtime::Runtime, session: AgentSession) -> a
         viewport: Viewport::Inline(LIVE_REGION_HEIGHT),
     })?;
 
+    // Unbounded, not merely convenient: the synchronous terminal loop below cannot
+    // `.await` a bounded `Sender::send`, and `UnboundedSender::send` /
+    // `UnboundedReceiver::try_recv` are both non-async. `App`'s `Status::Idle` gate
+    // keeps at most one prompt in flight, so the queue depth stays bounded in
+    // practice even though the channel type isn't. See
+    // docs/decisions/0003-sync-terminal-loop-explicit-runtime.md.
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<String>();
     let (result_tx, mut result_rx) = mpsc::unbounded_channel::<WorkerEvent>();
 
