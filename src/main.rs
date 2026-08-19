@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Write};
+mod tui;
 
 use clap::Parser;
 use fey::{AgentConfig, AgentSession};
@@ -21,21 +21,15 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let workspace_root = std::env::current_dir()?;
 
+    // Construct the session before entering the inline viewport so config,
+    // workspace, or client errors surface as plain stderr output rather than
+    // inside raw mode.
     let session = AgentSession::new(AgentConfig {
         model: cli.model,
         ollama_base_url: cli.ollama_url,
         workspace_root,
     })?;
 
-    tokio::runtime::Runtime::new()?.block_on(repl(session))
-}
-
-async fn repl(session: AgentSession) -> anyhow::Result<()> {
-    let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        let reply = session.prompt(&line?).await?;
-        println!("{}", reply.text);
-        io::stdout().flush()?;
-    }
-    Ok(())
+    let runtime = tokio::runtime::Runtime::new()?;
+    tui::run(&runtime, session)
 }

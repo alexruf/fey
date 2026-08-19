@@ -11,7 +11,7 @@ The crate is split into a binary and a library, per the UI-independent-core-vs-p
 - `src/lib.rs` — UI-independent core logic
 - `src/main.rs` — CLI entry point / terminal presentation
 
-`src/lib.rs` owns the read-only workspace sandbox (`workspace`) and the `list_directory`/`read_file` tools built on it (`tools`); both are private, not yet wired to an agent. `src/main.rs` remains a stub.
+`src/lib.rs` owns the read-only workspace sandbox (`workspace`), the `list_directory`/`read_file` tools built on it (`tools`), and the Ollama-backed `agent` module; it re-exports only `AgentConfig`, `AgentError`, `AgentReply`, and `AgentSession`. `src/main.rs` is the CLI/runtime composition root: it parses `Cli`, constructs `AgentSession`, builds an explicit `tokio::runtime::Runtime`, and runs the binary-only inline-viewport TUI under `src/tui/` (`mod.rs` event loop and worker, `app.rs` pure state, `view.rs` rendering) on the main thread outside that runtime.
 
 ### Commands
 
