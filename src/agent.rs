@@ -210,12 +210,28 @@ mod tests {
             2,
             "expected an initial call and a follow-up after the tool result"
         );
-        let tool_names: Vec<&str> = requests[0]
+    }
+
+    /// Guards I3 (docs/architecture.md): asserts the *exact* tool set, not
+    /// merely that the read-only tools are among those registered, so an
+    /// accidentally added write tool fails this test.
+    #[test]
+    fn offers_exactly_the_read_only_tools() {
+        let dir = TempDir::new().unwrap();
+        let ws = workspace(&dir);
+        let model = MockCompletionModel::from_turns([MockTurn::text("done")]);
+        let session = AgentSession::with_model(model.clone(), ws);
+
+        block_on(session.prompt("hi")).unwrap();
+
+        let requests = model.requests();
+        let mut tool_names: Vec<&str> = requests[0]
             .tools
             .iter()
             .map(|def| def.name.as_str())
             .collect();
-        assert!(tool_names.contains(&"list_directory"));
-        assert!(tool_names.contains(&"read_file"));
+        tool_names.sort_unstable();
+
+        assert_eq!(tool_names, ["list_directory", "read_file"]);
     }
 }
