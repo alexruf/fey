@@ -23,14 +23,3 @@ tackle in, given how the code is currently shaped.
    it needs its own decision about how the user approves risky actions before they happen. It's
    deliberately not something to bolt onto the current read-only design; see
    [ADR-0004](decisions/0004-read-only-workspace-sandbox.md).
-
-## Small fixes worth doing
-
-A few gaps were found while writing down the [architecture](architecture.md) rules — none are
-urgent, but they're easy wins:
-
-- **Stop leaking your machine's file paths into error messages the model can see.** Right now, if
-  the model asks for a file that doesn't exist, the error it gets back can include your full local
-  path rather than just the path relative to the project. See
-  [ADR-0005](decisions/0005-tool-error-visibility.md) for the full explanation, then add a test
-  once it's fixed so it can't quietly come back.

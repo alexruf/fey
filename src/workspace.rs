@@ -75,7 +75,7 @@ impl Workspace {
         let candidate = self.root.join(requested);
         let canonical = fs::canonicalize(&candidate).map_err(|source| {
             if source.kind() == io::ErrorKind::NotFound {
-                WorkspaceError::NotFound(candidate.clone())
+                WorkspaceError::NotFound(requested.to_path_buf())
             } else {
                 WorkspaceError::Io {
                     path: candidate.clone(),
@@ -85,17 +85,24 @@ impl Workspace {
         })?;
 
         if !canonical.starts_with(&self.root) {
-            return Err(WorkspaceError::OutsideWorkspace(canonical));
+            // The canonical target is, by definition, outside the workspace
+            // root and so has no workspace-relative form to report — the
+            // requested path is what the model actually sent and needs to
+            // correct, so report that instead (see ADR-0005 and I4 in
+            // docs/architecture.md: model-visible errors must not carry
+            // absolute host paths).
+            return Err(WorkspaceError::OutsideWorkspace(requested.to_path_buf()));
         }
 
         Ok(canonical)
     }
 
     pub(crate) fn resolve_dir(&self, path: Option<&str>) -> Result<PathBuf, WorkspaceError> {
-        let resolved = self.resolve(path.unwrap_or("."))?;
+        let requested = path.unwrap_or(".");
+        let resolved = self.resolve(requested)?;
         if !resolved.is_dir() {
             return Err(WorkspaceError::WrongKind {
-                path: resolved,
+                path: PathBuf::from(requested),
                 expected: "directory",
                 actual: "file",
             });
@@ -111,7 +118,7 @@ impl Workspace {
         })?;
         if !metadata.is_file() {
             return Err(WorkspaceError::WrongKind {
-                path: resolved,
+                path: PathBuf::from(path),
                 expected: "file",
                 actual: if metadata.is_dir() {
                     "directory"
@@ -251,6 +258,21 @@ mod tests {
         assert!(matches!(err, WorkspaceError::NotFound(_)));
     }
 
+    /// I4 (docs/architecture.md): a model-visible error must report the
+    /// workspace-relative path the model sent, not this machine's absolute
+    /// path to it. See ADR-0005.
+    #[test]
+    fn not_found_reports_the_requested_path_not_the_absolute_host_path() {
+        let dir = TempDir::new().unwrap();
+        let ws = workspace(&dir);
+
+        let err = ws.resolve_file("sub/nope.txt").unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("sub/nope.txt"));
+        assert!(!message.contains(dir.path().to_str().unwrap()));
+    }
+
     #[test]
     fn resolve_dir_rejects_a_file_target() {
         let dir = TempDir::new().unwrap();
@@ -260,6 +282,20 @@ mod tests {
         let err = ws.resolve_dir(Some("file.txt")).unwrap_err();
 
         assert!(matches!(err, WorkspaceError::WrongKind { .. }));
+    }
+
+    /// I4 (docs/architecture.md): see ADR-0005.
+    #[test]
+    fn wrong_kind_reports_the_requested_path_not_the_absolute_host_path() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("file.txt"), b"hi").unwrap();
+        let ws = workspace(&dir);
+
+        let err = ws.resolve_dir(Some("file.txt")).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("file.txt"));
+        assert!(!message.contains(dir.path().to_str().unwrap()));
     }
 
     #[test]
@@ -333,5 +369,30 @@ mod tests {
         let err = ws.resolve_file("escape").unwrap_err();
 
         assert!(matches!(err, WorkspaceError::OutsideWorkspace(_)));
+    }
+
+    /// I4 (docs/architecture.md): see ADR-0005. The canonical escape target
+    /// has no workspace-relative form to report, so the requested path (what
+    /// the model sent) is what should show up instead.
+    #[cfg(unix)]
+    #[test]
+    fn outside_workspace_reports_the_requested_path_not_the_absolute_host_path() {
+        use std::os::unix::fs::symlink;
+
+        let workspace_dir = TempDir::new().unwrap();
+        let outside_dir = TempDir::new().unwrap();
+        let outside_file = outside_dir.path().join("secret.txt");
+        fs::write(&outside_file, b"secret").unwrap();
+
+        let link = workspace_dir.path().join("escape");
+        symlink(&outside_file, &link).unwrap();
+
+        let ws = workspace(&workspace_dir);
+
+        let err = ws.resolve_file("escape").unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("escape"));
+        assert!(!message.contains(outside_dir.path().to_str().unwrap()));
     }
 }

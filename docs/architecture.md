@@ -65,15 +65,7 @@ a couple are weaker than they should be.
 | I1 | Nothing from the terminal/UI world (Ratatui, Clap, raw terminal types) is visible outside `src/lib.rs` — only the four core types are | [0001](decisions/0001-core-presentation-split.md) | Guarded by `tests/public_api.rs`: the four types' shape and the single re-export line in `src/lib.rs` |
 | I2 | Every tool that touches the filesystem goes through `Workspace` and can never resolve to a path outside it | [0004](decisions/0004-read-only-workspace-sandbox.md) | Well tested, including a symlink-escape test |
 | I3 | The agent only ever offers the model read-only tools — nothing that writes or runs a command | [0004](decisions/0004-read-only-workspace-sandbox.md), [0006](decisions/0006-ollama-only-injectable-model.md) | Guarded by a test asserting the exact tool set |
-| I4 | A failure the model can't do anything about (disk error, oversized file) never turns into a raw error message shown to the model | [0005](decisions/0005-tool-error-visibility.md) | Partial — see below |
+| I4 | A failure the model can't do anything about (disk error, oversized file) never turns into a raw error message shown to the model | [0005](decisions/0005-tool-error-visibility.md) | Guarded by tests in `src/workspace.rs` and `src/tools/mod.rs` |
 | I5 | The TUI never keeps its own copy of the conversation; a message is written to the terminal once and never redrawn | [0002](decisions/0002-inline-viewport-native-scrollback.md) | Guaranteed by how the state is structured, plus tests |
 | I6 | The terminal never blocks waiting on the network, and at most one prompt is ever in flight at a time | [0003](decisions/0003-sync-terminal-loop-explicit-runtime.md) | Guaranteed by how the state is structured |
 | I7 | However `fey` exits — quit, crash, a failed request — the terminal is always left in a normal, usable state | [0003](decisions/0003-sync-terminal-loop-explicit-runtime.md) | Guaranteed — this runs on every exit path |
-
-One of these is weaker than the table above lets on, and it's worth knowing why:
-
-- **I4** has a real gap: error messages the model is allowed to see currently do sometimes include
-  the full absolute file path on your machine, not just a path relative to the workspace. That's
-  not the end of the world, but it wasn't the intent — see
-  [ADR-0005](decisions/0005-tool-error-visibility.md) for the honest account of how this happened
-  and [roadmap.md](roadmap.md) for the fix.
