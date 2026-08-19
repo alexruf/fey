@@ -4,7 +4,7 @@
 
 ## Project Context
 
-`fey` is a minimal, terminal-native AI coding agent written in Rust. Read [README.md](README.md) for usage.
+`fey` is a minimal, terminal-native AI coding agent written in Rust. Read [`README.md`](README.md) for usage.
 
 The crate is split into a library (`src/lib.rs`) and a binary (`src/main.rs`, `src/tui/`), per the UI-independent-core-vs-presentation rule; `src/lib.rs` re-exports only `AgentConfig`, `AgentError`, `AgentReply`, and `AgentSession`.
 
@@ -85,7 +85,7 @@ When choosing between approaches, prioritize in order:
 
 ### Documentation
 
-- After every change or new feature: check whether README.md, AGENTS.md, `docs/architecture.md`, and any other affected docs still describe current behavior accurately; update what's stale, add what's missing
+- After every change or new feature: check whether `README.md`, `AGENTS.md`, `docs/architecture.md`, and any other affected docs still describe current behavior accurately; update what's stale, add what's missing
 - Treat outdated documentation as a defect, not an afterthought
 - **Exception: ADRs (`docs/decisions/`) are immutable historical records, not living documentation.** Never edit an accepted ADR to match a later change in behavior — write a new ADR that supersedes it and mark the original `Superseded by NNNN`. A change that alters an invariant in `docs/architecture.md` needs a new ADR explaining why, not just a doc edit.
-- **This file (AGENTS.md) is written for AI agents and stays dense and terse — that's correct for this file.** README.md and everything under `docs/` (including ADRs) are written for humans: write those as you'd explain the reasoning out loud to a colleague — plain sentences, lead with *why*, avoid arrow-chains and jargon-stacked parentheticals. Code identifiers and file paths are fine when they earn their place, but they shouldn't carry the explanation. If a paragraph needs re-reading twice to parse, rewrite it as prose before adding it.
+- **This file (`AGENTS.md`) is written for AI agents and stays dense and terse — that's correct for this file.** `README.md` and everything under `docs/` (including ADRs) are written for humans: write those as you'd explain the reasoning out loud to a colleague — plain sentences, lead with *why*, avoid arrow-chains and jargon-stacked parentheticals. Code identifiers and file paths are fine when they earn their place, but they shouldn't carry the explanation. If a paragraph needs re-reading twice to parse, rewrite it as prose before adding it.
