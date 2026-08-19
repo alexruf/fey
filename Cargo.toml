@@ -6,6 +6,7 @@ description = "A minimal, terminal-native AI coding agent"
 rust-version = "1.97.1"
 repository = "https://github.com/alexruf/fey"
 readme = "README.md"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.104"

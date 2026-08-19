@@ -42,3 +42,7 @@ cargo test --all-targets --all-features --locked
 ## Optional Nix development shell
 
 `nix develop` provides the same Rust toolchain from the locked flake. Nix is not required for the standard Cargo workflow. Future native dependencies belong in `flake.nix`.
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache License, Version 2.0](LICENSE-APACHE) at your option.
