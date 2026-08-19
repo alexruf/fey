@@ -29,8 +29,6 @@ tackle in, given how the code is currently shaped.
 A few gaps were found while writing down the [architecture](architecture.md) rules — none are
 urgent, but they're easy wins:
 
-- **Add a test that catches an accidental public API leak** — something that would fail loudly if
-  a terminal-only type ever ended up reachable from outside the library half of the code.
 - **Stop leaking your machine's file paths into error messages the model can see.** Right now, if
   the model asks for a file that doesn't exist, the error it gets back can include your full local
   path rather than just the path relative to the project. See
