@@ -20,7 +20,7 @@ cargo test --all-targets --all-features --locked
 
 Run a single test: `cargo test --locked <test_name>`
 
-Rustup is required; `rust-toolchain.toml` pins Rust 1.97.1 with Rustfmt and Clippy. `nix develop` provides the same toolchain from the locked flake as an optional alternative to rustup.
+Rustup is required; `rust-toolchain.toml` pins Rust version with Rustfmt and Clippy. `nix develop` provides the same toolchain from the locked flake as an optional alternative to rustup.
 
 ## Development Guidelines
 

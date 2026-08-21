@@ -31,7 +31,7 @@ does in your terminal.
 
 ## Development
 
-Rustup is required. `rust-toolchain.toml` selects Rust 1.97.1 with Rustfmt and Clippy.
+Rustup is required. `rust-toolchain.toml` selects Rust version with Rustfmt and Clippy.
 
 ```sh
 cargo fmt --all -- --check
