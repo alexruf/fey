@@ -6,7 +6,7 @@
 
 `fey` is a minimal, terminal-native AI coding agent written in Rust. Read [`README.md`](README.md) for usage.
 
-The crate is split into a library (`src/lib.rs`) and a binary (`src/main.rs`, `src/tui/`), per the UI-independent-core-vs-presentation rule; `src/lib.rs` re-exports only `AgentConfig`, `AgentError`, `AgentReply`, and `AgentSession`.
+The crate is split into a library (`src/lib.rs`) and a binary (`src/main.rs`, `src/tui/`), per the UI-independent-core-vs-presentation rule; `src/lib.rs` re-exports only `AgentConfig`, `AgentError`, `AgentReply`, `AgentSession`, and `ToolCall`.
 
 Before working on this codebase, read [`docs/`](docs/README.md) — start with [`docs/architecture.md`](docs/architecture.md) (boundary, request path, invariants) and `docs/decisions/` (ADRs: why things are shaped this way). [`docs/testing.md`](docs/testing.md) has the manual QA playbook; [`docs/roadmap.md`](docs/roadmap.md) has planned follow-ups.
 

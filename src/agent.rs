@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use rig::agent::{AgentHook, HookContext, ToolCall as ToolCallEvent, ToolCallAction};
 use rig::client::CompletionClient as _;
 use rig::completion::message::UserContent;
 use rig::completion::{CompletionModel, Message, Prompt, PromptError};
@@ -33,6 +34,20 @@ pub struct AgentConfig {
 
 pub struct AgentReply {
     pub text: String,
+}
+
+/// A tool call the agent is about to make, reported while the turn is still
+/// running so a caller can show what the agent is doing instead of an opaque
+/// wait.
+///
+/// `targets` holds the string arguments the model sent, in argument-name order:
+/// the path being read, the directory being listed. Numbers are left out
+/// deliberately — a paging offset says nothing about what the agent is looking
+/// at, which is the only thing this type exists to answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    pub name: String,
+    pub targets: Vec<String>,
 }
 
 pub struct AgentSession {
@@ -109,7 +124,17 @@ impl AgentSession {
         Self { agent, workspace }
     }
 
-    pub async fn prompt(&self, prompt: &str) -> Result<AgentReply, AgentError> {
+    /// Runs one turn, calling `on_tool_call` for each tool the model asks for
+    /// before that tool runs.
+    ///
+    /// The observer belongs to this turn rather than to the session because a
+    /// caller reporting progress wants it routed to wherever *this* prompt's
+    /// output goes. It is called from inside the turn, so it must not block:
+    /// see docs/decisions/0008-visible-tool-calls.md.
+    pub async fn prompt<F>(&self, prompt: &str, on_tool_call: F) -> Result<AgentReply, AgentError>
+    where
+        F: Fn(ToolCall) + Send + Sync + 'static,
+    {
         let trimmed = prompt.trim();
         if trimmed.is_empty() {
             return Err(AgentError::EmptyPrompt);
@@ -123,6 +148,7 @@ impl AgentSession {
             .prompt(trimmed)
             .conversation(CONVERSATION_ID)
             .tool_context(context)
+            .add_hook(ToolCallReporter(on_tool_call))
             .extended_details()
             .await?;
 
@@ -130,6 +156,45 @@ impl AgentSession {
             text: response.output,
         })
     }
+}
+
+/// Reports each tool call to an observer and otherwise leaves the run alone.
+///
+/// Rig's hooks can also rewrite arguments, skip a call, or stop the run; this
+/// one deliberately does none of that, so a caller watching the agent work can
+/// never change what the agent does.
+struct ToolCallReporter<F>(F);
+
+impl<F> AgentHook for ToolCallReporter<F>
+where
+    F: Fn(ToolCall) + Send + Sync + 'static,
+{
+    async fn on_tool_call(&self, _ctx: &HookContext, event: ToolCallEvent<'_>) -> ToolCallAction {
+        (self.0)(ToolCall {
+            name: event.tool_name.to_string(),
+            targets: tool_targets(event.args),
+        });
+        ToolCallAction::Run
+    }
+}
+
+/// Picks the string arguments out of a tool call's JSON arguments.
+///
+/// Malformed or non-object arguments yield nothing rather than an error: the
+/// model has just produced something the tool itself will reject, and a
+/// progress notification is not the place to report that.
+fn tool_targets(args: &str) -> Vec<String> {
+    let Ok(serde_json::Value::Object(arguments)) = serde_json::from_str(args) else {
+        return Vec::new();
+    };
+
+    arguments
+        .into_values()
+        .filter_map(|value| match value {
+            serde_json::Value::String(text) => Some(text),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Keeps only the most recent `HISTORY_TURNS` turns of a conversation.
@@ -187,6 +252,19 @@ mod tests {
         Workspace::new(dir.path().to_path_buf()).expect("workspace root should be valid")
     }
 
+    /// Most tests here do not care what the agent reports while it works.
+    fn ignore_tool_calls(_: ToolCall) {}
+
+    /// Collects what an observer reported. The sender is dropped with the
+    /// closure when the turn ends, so nothing is still in flight here.
+    fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<ToolCall>) -> Vec<ToolCall> {
+        let mut calls = Vec::new();
+        while let Ok(call) = rx.try_recv() {
+            calls.push(call);
+        }
+        calls
+    }
+
     #[test]
     fn new_rejects_a_blank_model_name_without_touching_the_network() {
         let dir = TempDir::new().unwrap();
@@ -226,7 +304,9 @@ mod tests {
         };
         let session = AgentSession::new(config).expect("client construction is network-free");
 
-        let err = block_on(session.prompt("   ")).err().unwrap();
+        let err = block_on(session.prompt("   ", ignore_tool_calls))
+            .err()
+            .unwrap();
 
         assert!(matches!(err, AgentError::EmptyPrompt));
     }
@@ -248,7 +328,8 @@ mod tests {
 
         let session = AgentSession::with_model(model.clone(), ws);
 
-        let reply = block_on(session.prompt("what does hello.txt say?")).unwrap();
+        let reply =
+            block_on(session.prompt("what does hello.txt say?", ignore_tool_calls)).unwrap();
 
         assert_eq!(reply.text, "The file says hi there.");
 
@@ -258,6 +339,87 @@ mod tests {
             2,
             "expected an initial call and a follow-up after the tool result"
         );
+    }
+
+    #[test]
+    fn reports_each_tool_call_before_it_runs() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), "hi there").unwrap();
+        let ws = workspace(&dir);
+
+        let model = MockCompletionModel::from_turns([
+            MockTurn::tool_call("call-1", "list_directory", serde_json::json!({})),
+            MockTurn::tool_call(
+                "call-2",
+                "read_file",
+                serde_json::json!({ "path": "hello.txt", "start_line": 1 }),
+            ),
+            MockTurn::text("The file says hi there."),
+        ]);
+        let session = AgentSession::with_model(model, ws);
+
+        // The same shape the TUI uses: an unbounded sender is `Send + Sync`,
+        // so the observer needs no lock of its own.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        block_on(session.prompt("what does hello.txt say?", move |call| {
+            tx.send(call).expect("the receiver outlives the turn");
+        }))
+        .unwrap();
+
+        let calls = drain(&mut rx);
+        assert_eq!(
+            calls,
+            vec![
+                ToolCall {
+                    name: "list_directory".to_string(),
+                    targets: Vec::new(),
+                },
+                ToolCall {
+                    name: "read_file".to_string(),
+                    // `start_line` is numeric, so it is not a target.
+                    targets: vec!["hello.txt".to_string()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tool_call_is_reported_even_when_the_tool_itself_fails() {
+        let dir = TempDir::new().unwrap();
+        let ws = workspace(&dir);
+
+        let model = MockCompletionModel::from_turns([
+            MockTurn::tool_call(
+                "call-1",
+                "read_file",
+                serde_json::json!({ "path": "../escape.txt" }),
+            ),
+            MockTurn::text("I cannot read outside the workspace."),
+        ]);
+        let session = AgentSession::with_model(model, ws);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        block_on(session.prompt("read ../escape.txt", move |call| {
+            tx.send(call).expect("the receiver outlives the turn");
+        }))
+        .unwrap();
+
+        let calls = drain(&mut rx);
+        assert_eq!(calls.len(), 1, "the attempt is what the user needs to see");
+        assert_eq!(calls[0].targets, vec!["../escape.txt".to_string()]);
+    }
+
+    #[test]
+    fn tool_targets_keeps_only_the_string_arguments_in_name_order() {
+        let targets = tool_targets(r#"{"start_line": 12, "path": "src/agent.rs"}"#);
+
+        assert_eq!(targets, vec!["src/agent.rs".to_string()]);
+    }
+
+    #[test]
+    fn tool_targets_reports_nothing_for_arguments_that_are_not_a_json_object() {
+        assert!(tool_targets("not json at all").is_empty());
+        assert!(tool_targets("[\"src/agent.rs\"]").is_empty());
     }
 
     /// Guards I3 (docs/architecture.md): asserts the *exact* tool set, not
@@ -270,7 +432,7 @@ mod tests {
         let model = MockCompletionModel::from_turns([MockTurn::text("done")]);
         let session = AgentSession::with_model(model.clone(), ws);
 
-        block_on(session.prompt("hi")).unwrap();
+        block_on(session.prompt("hi", ignore_tool_calls)).unwrap();
 
         let requests = model.requests();
         let mut tool_names: Vec<&str> = requests[0]
@@ -354,7 +516,7 @@ mod tests {
         let session = AgentSession::with_model(model.clone(), ws);
 
         for i in 0..HISTORY_TURNS + 4 {
-            block_on(session.prompt(&format!("prompt {i}"))).unwrap();
+            block_on(session.prompt(&format!("prompt {i}"), ignore_tool_calls)).unwrap();
         }
 
         let requests = model.requests();

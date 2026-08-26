@@ -16,6 +16,9 @@ clap = { version = "4.6.6", features = ["derive", "env"] }
 # this design's primary output path (docs/decisions/0002). No test guards this.
 ratatui = { version = "0.30.2", features = ["scrolling-regions"] }
 rig = "0.42.0"
+# Tool-call arguments arrive from the model as a JSON string, and the tool-call
+# notifications the UI shows are summarized from them (docs/decisions/0008).
+serde_json = "1.0.151"
 thiserror = "2.0.20"
 # No "macros" feature: nothing uses #[tokio::main]. main.rs builds the Runtime
 # explicitly and runs the terminal loop on the main thread, outside it — see
@@ -26,4 +29,3 @@ unicode-width = "0.2.2"
 [dev-dependencies]
 tempfile = "3.27.0"
 rig = { version = "0.42.0", features = ["test-utils"] }
-serde_json = "1.0.151"

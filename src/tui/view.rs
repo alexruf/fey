@@ -88,6 +88,9 @@ pub(crate) fn wrap_message(message: &Message, width: u16) -> Vec<Line<'static>> 
     let (label, color) = match message.role {
         Role::User => ("You: ", Color::Cyan),
         Role::Assistant => ("Fey: ", Color::Green),
+        // Dim on purpose: a tool line is a note about work in progress, and it
+        // should not compete with the answer it leads up to.
+        Role::Tool => ("Tool: ", Color::DarkGray),
         Role::Error => ("Error: ", Color::Red),
     };
     let style = Style::default().fg(color);
@@ -217,6 +220,13 @@ mod tests {
         let lines = plain_lines(&message(Role::User, "hi"), 80);
 
         assert_eq!(lines, vec!["You: hi".to_string()]);
+    }
+
+    #[test]
+    fn labels_a_tool_call_line() {
+        let lines = plain_lines(&message(Role::Tool, "read_file(src/agent.rs)"), 80);
+
+        assert_eq!(lines, vec!["Tool: read_file(src/agent.rs)".to_string()]);
     }
 
     #[test]

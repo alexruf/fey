@@ -18,8 +18,8 @@ Concretely:
 
 - The **core** — `src/lib.rs` and the `agent`, `tools`, and `workspace` modules under it — is
   everything that doesn't care whether it's driven by a terminal, a test, or something else
-  entirely. It only ever exposes four public types: `AgentConfig`, `AgentError`, `AgentReply`,
-  `AgentSession`. Nothing else is meant to be reachable from outside.
+  entirely. It only ever exposes five public types: `AgentConfig`, `AgentError`, `AgentReply`,
+  `AgentSession`, `ToolCall`. Nothing else is meant to be reachable from outside.
 - The **presentation** layer — `src/main.rs` and everything under `src/tui/` — owns the terminal:
   parsing CLI flags, running the async runtime, reading keystrokes, and drawing the screen. It's
   allowed to depend on the core. The core is never allowed to depend on it.
@@ -44,7 +44,10 @@ So a prompt takes two hops:
 2. **The worker asks the model.** It calls the agent, which may read a file or list a directory
    along the way (always through the sandboxed workspace, never the raw filesystem — see
    [ADR-0004](decisions/0004-read-only-workspace-sandbox.md)), and eventually gets back a final
-   answer or an error. That result is handed back to the terminal, which writes it into
+   answer or an error. Each tool call is reported back to the terminal as it happens, before the
+   tool runs, and the answer follows through the same queue afterwards — which is what keeps the
+   two in the order they happened (see
+   [ADR-0008](decisions/0008-visible-tool-calls.md)). The terminal writes each of them into
    scrollback the same way your own message was written.
 
 There's exactly one place this crosses from "terminal code" into "agent code": a single function
@@ -62,7 +65,7 @@ a couple are weaker than they should be.
 
 | # | Rule | Why (ADR) | How well it's guarded |
 | --- | --- | --- | --- |
-| I1 | Nothing from the terminal/UI world (Ratatui, Clap, raw terminal types) is visible outside `src/lib.rs` — only the four core types are | [0001](decisions/0001-core-presentation-split.md) | Guarded by `tests/public_api.rs`: the four types' shape and the single re-export line in `src/lib.rs` |
+| I1 | Nothing from the terminal/UI world (Ratatui, Clap, raw terminal types) is visible outside `src/lib.rs` — only the five core types are | [0001](decisions/0001-core-presentation-split.md), [0008](decisions/0008-visible-tool-calls.md) | Guarded by `tests/public_api.rs`: the five types' shape and the single re-export line in `src/lib.rs` |
 | I2 | Every tool that touches the filesystem goes through `Workspace` and can never resolve to a path outside it | [0004](decisions/0004-read-only-workspace-sandbox.md) | Guaranteed by the type system: reading requires a `ResolvedPath`, and only `Workspace` can build one, so an unchecked path cannot be passed in. Also covered by tests, including a symlink escape |
 | I3 | The agent only ever offers the model read-only tools — nothing that writes or runs a command | [0004](decisions/0004-read-only-workspace-sandbox.md), [0006](decisions/0006-ollama-only-injectable-model.md) | Guarded by a test asserting the exact tool set |
 | I4 | A failure the model can't do anything about (disk error, oversized file) never turns into a raw error message shown to the model | [0005](decisions/0005-tool-error-visibility.md) | Guarded by tests in `src/workspace.rs` and `src/tools/mod.rs` |

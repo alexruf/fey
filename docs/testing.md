@@ -1,6 +1,6 @@
 # Manual QA playbook
 
-The nearly one hundred tests that live next to the code check individual pieces in isolation — no
+The hundred-odd tests that live next to the code check individual pieces in isolation — no
 network, no real terminal. What follows is what those tests can't reach: things you have to
 actually run and watch. Do this before a release, or after touching `src/agent.rs` or anything
 under `src/tui/`.
@@ -20,12 +20,16 @@ cargo run --locked -- --model <tag>
 ```
 
 1. Ask: `List the files at the workspace root, then read Cargo.toml and tell me the package name
-   and direct dependencies.` The answer should correctly name the package, cite `Cargo.toml`, and
-   only mention dependencies it actually read through the tools — not ones it's guessing at.
+   and direct dependencies.` While it works, each tool call should appear on its own dim line as
+   it happens — `Tool: list_directory()`, `Tool: read_file(Cargo.toml)` — in the order the model
+   made them, and all of them before the answer. The answer should correctly name the package,
+   cite `Cargo.toml`, and only mention dependencies it actually read through the tools — not ones
+   it's guessing at.
 2. Follow up with: `What did I ask you to inspect?` — this checks that the conversation actually
    remembers the previous turn.
 3. While the model is thinking, the app should stay responsive — you should still be able to see
-   it redraw and still be able to press Ctrl-C.
+   it redraw and still be able to press Ctrl-C. Typing is still ignored until the answer arrives,
+   including while tool lines are appearing.
 
 ## Things to check by hand in the terminal itself
 

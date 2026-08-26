@@ -23,6 +23,15 @@ The interface stays out of your way: only the input line and a status line at th
 terminal's normal scrollback, so scrolling back and copying text just works the way it always
 does in your terminal.
 
+While the agent is working, each file it reads and each folder it lists appears on its own line as
+it happens, so a slow answer is visibly a slow answer rather than a frozen app:
+
+```
+You: Which files are in the docs folder?
+Tool: list_directory(docs)
+Fey: README.md, architecture.md, decisions/, roadmap.md, testing.md
+```
+
 | Key | Action |
 | --- | --- |
 | Type | Compose a single-line prompt |

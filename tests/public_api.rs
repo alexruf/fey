@@ -1,6 +1,6 @@
 //! Guards I1 (docs/architecture.md): nothing terminal-related is reachable
-//! from `fey`'s public API, and the API surface is exactly the four types
-//! ADR-0001 names.
+//! from `fey`'s public API, and the API surface is exactly the five types
+//! ADR-0001 and ADR-0008 name.
 //!
 //! Two checks, because neither alone covers the invariant: the shape check
 //! below would happily pass if `src/lib.rs` re-exported a fifth, terminal-only
@@ -16,7 +16,7 @@
 
 use std::path::PathBuf;
 
-use fey::{AgentConfig, AgentError, AgentReply, AgentSession};
+use fey::{AgentConfig, AgentError, AgentReply, AgentSession, ToolCall};
 
 fn assert_send_sync<T: Send + Sync>() {}
 
@@ -34,15 +34,22 @@ fn public_types_are_built_from_plain_std_types_and_are_send_sync() {
         text: String::from("hi"),
     };
     assert_eq!(text, "hi");
+    let ToolCall { name, targets } = ToolCall {
+        name: String::from("read_file"),
+        targets: vec![String::from("src/agent.rs")],
+    };
+    assert_eq!(name, "read_file");
+    assert_eq!(targets, ["src/agent.rs"]);
 
     assert_send_sync::<AgentConfig>();
     assert_send_sync::<AgentError>();
     assert_send_sync::<AgentReply>();
     assert_send_sync::<AgentSession>();
+    assert_send_sync::<ToolCall>();
 }
 
 #[test]
-fn lib_rs_exports_exactly_the_four_documented_core_types() {
+fn lib_rs_exports_exactly_the_five_documented_core_types() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let lib_rs = std::fs::read_to_string(format!("{manifest_dir}/src/lib.rs"))
         .expect("src/lib.rs should be readable");
@@ -56,10 +63,10 @@ fn lib_rs_exports_exactly_the_four_documented_core_types() {
     assert_eq!(
         pub_lines.len(),
         1,
-        "expected exactly one `pub` item in src/lib.rs (the four-type re-export), found: {pub_lines:?}"
+        "expected exactly one `pub` item in src/lib.rs (the five-type re-export), found: {pub_lines:?}"
     );
     assert_eq!(
         pub_lines[0],
-        "pub use agent::{AgentConfig, AgentError, AgentReply, AgentSession};"
+        "pub use agent::{AgentConfig, AgentError, AgentReply, AgentSession, ToolCall};"
     );
 }

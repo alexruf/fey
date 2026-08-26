@@ -4,4 +4,4 @@ mod agent;
 mod tools;
 mod workspace;
 
-pub use agent::{AgentConfig, AgentError, AgentReply, AgentSession};
+pub use agent::{AgentConfig, AgentError, AgentReply, AgentSession, ToolCall};

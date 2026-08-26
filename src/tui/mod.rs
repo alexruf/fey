@@ -40,7 +40,14 @@ pub(crate) fn run(runtime: &tokio::runtime::Runtime, session: AgentSession) -> a
 
     let worker = runtime.spawn(async move {
         while let Some(prompt) = command_rx.recv().await {
-            let event = match session.prompt(&prompt).await {
+            // A clone per prompt, so the observer this turn reports through is
+            // dropped with the turn. A closed channel means the terminal loop
+            // is already gone; the send below notices and ends the worker.
+            let tool_tx = result_tx.clone();
+            let observed = session.prompt(&prompt, move |call| {
+                let _ = tool_tx.send(WorkerEvent::ToolCall(call));
+            });
+            let event = match observed.await {
                 Ok(reply) => WorkerEvent::Reply(reply),
                 Err(err) => WorkerEvent::Failed(err),
             };
@@ -118,7 +125,7 @@ fn event_loop(
 
         match result_rx.try_recv() {
             Ok(event) => {
-                let message = app.complete(event);
+                let message = app.receive(event);
                 flush_message(terminal, &message)?;
                 dirty = true;
             }

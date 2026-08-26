@@ -5,12 +5,13 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use fey::{AgentError, AgentReply};
+use fey::{AgentError, AgentReply, ToolCall};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Role {
     User,
     Assistant,
+    Tool,
     Error,
 }
 
@@ -35,10 +36,15 @@ pub(crate) enum Action {
     None,
 }
 
-/// Worker->UI channel payload. Deliberately not `Result<AgentReply, AgentError>`:
-/// tool-call visibility is the intended next feature, and adding a `ToolCall`
-/// variant later must not be a signature change at every call site.
+/// Worker->UI channel payload.
+///
+/// Tool calls travel the same queue as the reply they precede, which is what
+/// makes them appear in the right order: the worker sends each one before the
+/// reply, and the terminal loop flushes whatever it finds in the order it
+/// arrives. Two separate queues would leave that ordering to chance. See
+/// docs/decisions/0008-visible-tool-calls.md.
 pub(crate) enum WorkerEvent {
+    ToolCall(ToolCall),
     Reply(AgentReply),
     Failed(AgentError),
 }
@@ -125,19 +131,31 @@ impl App {
         Action::Submit(message)
     }
 
-    /// Called once a worker event arrives: restores `Idle` and returns the
-    /// message to flush.
-    pub(crate) fn complete(&mut self, event: WorkerEvent) -> Message {
-        self.status = Status::Idle;
+    /// Called once a worker event arrives: returns the message to flush, and
+    /// restores `Idle` for the events that end the turn.
+    ///
+    /// A tool call is not one of them — it says the turn is still going, so the
+    /// status stays `Thinking` and the input stays locked.
+    pub(crate) fn receive(&mut self, event: WorkerEvent) -> Message {
         match event {
-            WorkerEvent::Reply(reply) => Message {
-                role: Role::Assistant,
-                text: reply.text,
+            WorkerEvent::ToolCall(call) => Message {
+                role: Role::Tool,
+                text: describe_tool_call(&call),
             },
-            WorkerEvent::Failed(err) => Message {
-                role: Role::Error,
-                text: error_chain(&err),
-            },
+            WorkerEvent::Reply(reply) => {
+                self.status = Status::Idle;
+                Message {
+                    role: Role::Assistant,
+                    text: reply.text,
+                }
+            }
+            WorkerEvent::Failed(err) => {
+                self.status = Status::Idle;
+                Message {
+                    role: Role::Error,
+                    text: error_chain(&err),
+                }
+            }
         }
     }
 
@@ -160,6 +178,16 @@ impl App {
 /// Anything beyond Shift (Ctrl, Alt, Super, …) is a command, not text.
 fn is_plain_or_shifted(modifiers: KeyModifiers) -> bool {
     modifiers.difference(KeyModifiers::SHIFT).is_empty()
+}
+
+/// Renders a tool call as the single line shown while the turn runs, in the
+/// shape a reader already knows: `read_file(src/agent.rs)`.
+///
+/// The parentheses are always there, so a call the model made without any
+/// string arguments — `list_directory()`, meaning the workspace root — still
+/// reads as a call rather than as a stray word.
+fn describe_tool_call(call: &ToolCall) -> String {
+    format!("{}({})", call.name, call.targets.join(", "))
 }
 
 /// Renders an error together with every cause behind it.
@@ -296,18 +324,54 @@ mod tests {
     }
 
     #[test]
-    fn complete_restores_idle_and_returns_assistant_message_on_reply() {
+    fn receive_restores_idle_and_returns_assistant_message_on_reply() {
         let mut app = App::new();
         app.handle_key(key(KeyCode::Char('a')));
         app.handle_key(key(KeyCode::Enter));
 
-        let message = app.complete(WorkerEvent::Reply(AgentReply {
+        let message = app.receive(WorkerEvent::Reply(AgentReply {
             text: "hi there".to_string(),
         }));
 
         assert_eq!(app.status(), Status::Idle);
         assert_eq!(message.role, Role::Assistant);
         assert_eq!(message.text, "hi there");
+    }
+
+    #[test]
+    fn receive_keeps_thinking_while_reporting_a_tool_call() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('a')));
+        app.handle_key(key(KeyCode::Enter));
+
+        let message = app.receive(WorkerEvent::ToolCall(ToolCall {
+            name: "read_file".to_string(),
+            targets: vec!["src/agent.rs".to_string()],
+        }));
+
+        assert_eq!(app.status(), Status::Thinking);
+        assert_eq!(message.role, Role::Tool);
+        assert_eq!(message.text, "read_file(src/agent.rs)");
+    }
+
+    #[test]
+    fn a_tool_call_without_arguments_still_reads_as_a_call() {
+        let call = ToolCall {
+            name: "list_directory".to_string(),
+            targets: Vec::new(),
+        };
+
+        assert_eq!(describe_tool_call(&call), "list_directory()");
+    }
+
+    #[test]
+    fn several_arguments_are_listed_in_order() {
+        let call = ToolCall {
+            name: "search".to_string(),
+            targets: vec!["needle".to_string(), "src".to_string()],
+        };
+
+        assert_eq!(describe_tool_call(&call), "search(needle, src)");
     }
 
     #[test]
@@ -324,14 +388,14 @@ mod tests {
     }
 
     #[test]
-    fn complete_reports_every_cause_behind_a_failure() {
+    fn receive_reports_every_cause_behind_a_failure() {
         let mut app = App::new();
         let event = WorkerEvent::Failed(AgentError::Workspace {
             path: std::path::PathBuf::from("/tmp/ws"),
             source: Box::new(std::io::Error::other("connection refused")),
         });
 
-        let message = app.complete(event);
+        let message = app.receive(event);
 
         assert_eq!(message.role, Role::Error);
         assert_eq!(
