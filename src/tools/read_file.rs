@@ -7,12 +7,37 @@ use crate::workspace::{Workspace, WorkspaceError};
 const MAX_LINES: usize = 200;
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
+/// Why the output was cut short. The distinction matters to the model: one
+/// case is recoverable by asking again, the other is not.
+enum Truncation {
+    /// Whole lines were left out. A later `start_line` reaches them.
+    MoreLines,
+    /// One line was too large to fit even on its own, so it was clipped.
+    /// No `start_line` can ever reach the remainder of that line.
+    ClippedLine(usize),
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum ReadFileError {
     #[error("start_line must be at least 1")]
     ZeroStartLine,
     #[error(transparent)]
     Workspace(#[from] WorkspaceError),
+}
+
+/// Truncates `text` to at most `max` bytes without splitting a character.
+///
+/// Slicing a `&str` at an arbitrary byte index panics when it lands inside a
+/// multi-byte character, so back off to the nearest boundary first.
+fn clip_to_bytes(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
 }
 
 pub(crate) fn read_file(
@@ -40,18 +65,27 @@ pub(crate) fn read_file(
 
     let mut formatted_lines: Vec<String> = Vec::new();
     let mut byte_count = 0usize;
-    let mut truncated = false;
+    let mut truncation: Option<Truncation> = None;
 
     for (offset, line) in lines[start_index..].iter().enumerate() {
         if formatted_lines.len() >= MAX_LINES {
-            truncated = true;
+            truncation = Some(Truncation::MoreLines);
             break;
         }
         let line_number = start_line + offset;
         let formatted = format!("{line_number}: {line}");
         let separator = usize::from(!formatted_lines.is_empty());
         if byte_count + separator + formatted.len() > MAX_OUTPUT_BYTES {
-            truncated = true;
+            if formatted_lines.is_empty() {
+                // This line does not fit even with the whole budget to
+                // itself, so skipping it would hide it permanently: every
+                // retry starts here again and returns nothing. Hand back a
+                // clipped prefix instead of an empty result.
+                formatted_lines.push(clip_to_bytes(&formatted, MAX_OUTPUT_BYTES));
+                truncation = Some(Truncation::ClippedLine(line_number));
+            } else {
+                truncation = Some(Truncation::MoreLines);
+            }
             break;
         }
         byte_count += separator + formatted.len();
@@ -59,11 +93,19 @@ pub(crate) fn read_file(
     }
 
     let mut output = formatted_lines.join("\n");
-    if truncated {
+    if let Some(truncation) = truncation {
         if !output.is_empty() {
             output.push('\n');
         }
-        output.push_str("... output truncated; call read_file again with a later start_line");
+        match truncation {
+            Truncation::MoreLines => output
+                .push_str("... output truncated; call read_file again with a later start_line"),
+            Truncation::ClippedLine(line_number) => output.push_str(&format!(
+                "... line {line_number} exceeds {MAX_OUTPUT_BYTES} bytes and was clipped; \
+                 the rest of that line is unreachable, continue at start_line {}",
+                line_number + 1
+            )),
+        }
     }
 
     Ok(output)
@@ -234,5 +276,62 @@ mod tests {
             err,
             ReadFileError::Workspace(WorkspaceError::WrongKind { .. })
         ));
+    }
+
+    #[test]
+    fn clips_a_line_too_large_to_fit_instead_of_returning_nothing() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("min.js"), "x".repeat(70 * 1024)).unwrap();
+        let ws = workspace(&dir);
+
+        let output = read_file(&ws, "min.js", None).unwrap();
+
+        assert!(output.starts_with("1: xxx"), "content must be returned");
+        assert!(output.len() > MAX_OUTPUT_BYTES / 2);
+        assert!(output.contains("was clipped"));
+    }
+
+    /// The old advice ("call again with a later start_line") was unreachable
+    /// for a single over-long line: the retry landed on the same line and
+    /// returned nothing, so the model could loop forever.
+    #[test]
+    fn a_clipped_line_points_at_the_next_reachable_line() {
+        let dir = TempDir::new().unwrap();
+        let content = format!("{}\nsecond line\n", "x".repeat(70 * 1024));
+        fs::write(dir.path().join("min.js"), content).unwrap();
+        let ws = workspace(&dir);
+
+        let output = read_file(&ws, "min.js", None).unwrap();
+        assert!(output.contains("continue at start_line 2"));
+
+        let follow_up = read_file(&ws, "min.js", Some(2)).unwrap();
+        assert_eq!(follow_up, "2: second line");
+    }
+
+    #[test]
+    fn clipping_never_splits_a_multi_byte_character() {
+        let dir = TempDir::new().unwrap();
+        // 2 bytes per char, so the clip boundary lands mid-character unless
+        // it is moved back to a char boundary.
+        fs::write(dir.path().join("wide.txt"), "ä".repeat(40 * 1024)).unwrap();
+        let ws = workspace(&dir);
+
+        let output = read_file(&ws, "wide.txt", None).unwrap();
+
+        assert!(output.contains("was clipped"));
+        assert!(output.starts_with("1: ää"));
+    }
+
+    #[test]
+    fn whole_lines_left_out_still_advise_a_later_start_line() {
+        let dir = TempDir::new().unwrap();
+        let content: String = (1..=201).map(|i| format!("line{i}\n")).collect();
+        fs::write(dir.path().join("f.txt"), content).unwrap();
+        let ws = workspace(&dir);
+
+        let output = read_file(&ws, "f.txt", None).unwrap();
+
+        assert!(output.ends_with("call read_file again with a later start_line"));
+        assert!(!output.contains("was clipped"));
     }
 }
