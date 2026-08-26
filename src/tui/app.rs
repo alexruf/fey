@@ -91,6 +91,22 @@ impl App {
         }
     }
 
+    /// Appends pasted text to the input buffer.
+    ///
+    /// The prompt is a single line, so a pasted block has to become one.
+    /// Control characters — newlines above all — become spaces: dropping them
+    /// would silently run words together, and keeping them would put a newline
+    /// into a widget that renders one row.
+    pub(crate) fn paste(&mut self, text: &str) -> Action {
+        if self.status != Status::Idle || text.is_empty() {
+            return Action::None;
+        }
+
+        self.input
+            .extend(text.chars().map(|c| if c.is_control() { ' ' } else { c }));
+        Action::Edit
+    }
+
     fn submit(&mut self) -> Action {
         if self.status != Status::Idle {
             return Action::None;
@@ -353,6 +369,46 @@ mod tests {
         let action = app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
 
         assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn paste_appends_to_the_input_buffer() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('>')));
+
+        let action = app.paste("cargo test");
+
+        assert_eq!(action, Action::Edit);
+        assert_eq!(app.input(), ">cargo test");
+    }
+
+    #[test]
+    fn paste_flattens_newlines_into_spaces() {
+        let mut app = App::new();
+
+        app.paste("first\nsecond\r\nthird");
+
+        assert_eq!(app.input(), "first second  third");
+    }
+
+    #[test]
+    fn paste_is_ignored_while_a_prompt_is_in_flight() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.status(), Status::Thinking);
+
+        let action = app.paste("ignored");
+
+        assert_eq!(action, Action::None);
+        assert_eq!(app.input(), "");
+    }
+
+    #[test]
+    fn pasting_nothing_reports_no_edit() {
+        let mut app = App::new();
+
+        assert_eq!(app.paste(""), Action::None);
     }
 
     /// Mirrors how Rig's error types behave: each layer prints its own source

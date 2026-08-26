@@ -19,7 +19,7 @@ use crate::tui::app::{App, Message, Role, Status};
 const PROMPT: &str = "› ";
 const HELP_FOOTER: &str = "Enter send · Ctrl-C quit";
 const THINKING_FOOTER: &str = "Thinking…";
-const STOPPED_FOOTER: &str = "Agent stopped";
+const STOPPED_FOOTER: &str = "Agent stopped · Ctrl-C quit";
 
 pub(crate) const LIVE_REGION_HEIGHT: u16 = 2;
 

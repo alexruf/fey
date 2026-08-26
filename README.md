@@ -26,6 +26,7 @@ does in your terminal.
 | Key | Action |
 | --- | --- |
 | Type | Compose a single-line prompt |
+| Paste | Insert text into the prompt; newlines become spaces, so a pasted block stays one line |
 | Enter | Submit the prompt |
 | Ctrl-C | Quit (aborts an in-flight prompt immediately) |
 

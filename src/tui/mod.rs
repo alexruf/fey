@@ -6,9 +6,13 @@
 mod app;
 mod view;
 
+use std::io;
 use std::time::Duration;
 
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind,
+};
+use ratatui::crossterm::execute;
 use ratatui::{DefaultTerminal, TerminalOptions, Viewport};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -46,7 +50,11 @@ pub(crate) fn run(runtime: &tokio::runtime::Runtime, session: AgentSession) -> a
         }
     });
 
-    let loop_result = event_loop(&mut terminal, &command_tx, &mut result_rx);
+    // Enabling bracketed paste is folded into `loop_result` rather than run
+    // with `?` above: a failure here must still reach `restore` below, or the
+    // terminal is left in raw mode (I7 in docs/architecture.md).
+    let loop_result = enable_bracketed_paste()
+        .and_then(|()| event_loop(&mut terminal, &command_tx, &mut result_rx));
     drop(command_tx);
     worker.abort();
 
@@ -62,21 +70,36 @@ pub(crate) fn run(runtime: &tokio::runtime::Runtime, session: AgentSession) -> a
     }
 }
 
-/// Clears the inline viewport and restores raw mode. `try_restore` alone
-/// leaves the live region's rows printed as leftover garbage: it disables
-/// raw mode but does not erase the viewport.
-fn restore(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
-    let clear_result = terminal.clear().map_err(anyhow::Error::from);
-    let raw_mode_result = ratatui::try_restore().map_err(anyhow::Error::from);
+fn enable_bracketed_paste() -> anyhow::Result<()> {
+    execute!(io::stdout(), EnableBracketedPaste)?;
+    Ok(())
+}
 
-    match (clear_result, raw_mode_result) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(err), Ok(())) => Err(err),
-        (Ok(()), Err(err)) => Err(err),
-        (Err(clear_err), Err(raw_mode_err)) => {
-            Err(clear_err.context(format!("raw mode restoration also failed: {raw_mode_err}")))
-        }
-    }
+/// Undoes every terminal mode `run` turned on, and clears the inline viewport.
+///
+/// `try_restore` alone leaves the live region's rows printed as leftover
+/// garbage: it disables raw mode but does not erase the viewport. Bracketed
+/// paste has to be turned off too, or the user's shell keeps receiving paste
+/// markers after `fey` exits.
+///
+/// Every step runs even when an earlier one failed. Skipping the rest after the
+/// first error is what would leave a terminal unusable, which is the one thing
+/// I7 (docs/architecture.md) rules out.
+fn restore(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
+    let mut failures = [
+        execute!(io::stdout(), DisableBracketedPaste).map_err(anyhow::Error::from),
+        terminal.clear().map_err(anyhow::Error::from),
+        ratatui::try_restore().map_err(anyhow::Error::from),
+    ]
+    .into_iter()
+    .filter_map(Result::err);
+
+    let Some(first) = failures.next() else {
+        return Ok(());
+    };
+    Err(failures.fold(first, |reported, also| {
+        reported.context(format!("another restoration step also failed: {also}"))
+    }))
 }
 
 fn event_loop(
@@ -124,6 +147,11 @@ fn event_loop(
                     Action::Quit => return Ok(()),
                     Action::None => {}
                 },
+                Event::Paste(text) => {
+                    if app.paste(&text) == Action::Edit {
+                        dirty = true;
+                    }
+                }
                 Event::Resize(_, _) => dirty = true,
                 _ => {}
             }
@@ -131,10 +159,21 @@ fn event_loop(
     }
 }
 
+/// Writes a finalized message into the terminal's native scrollback.
+///
+/// `insert_before` takes the height as a `u16`, so a message taller than that
+/// is written in several passes. Casting the length instead would wrap and drop
+/// most of the message without any sign that it happened.
 fn flush_message(terminal: &mut DefaultTerminal, message: &Message) -> anyhow::Result<()> {
     let width = terminal.size()?.width;
-    let lines = wrap_message(message, width);
-    let height = lines.len() as u16;
-    terminal.insert_before(height, move |buf| render_message(lines, buf))?;
+    let mut lines = wrap_message(message, width);
+
+    while !lines.is_empty() {
+        let taken = lines.len().min(u16::MAX as usize);
+        let rest = lines.split_off(taken);
+        terminal.insert_before(taken as u16, move |buf| render_message(lines, buf))?;
+        lines = rest;
+    }
+
     Ok(())
 }

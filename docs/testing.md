@@ -1,9 +1,9 @@
 # Manual QA playbook
 
-The 60 or so tests that live next to the code check individual pieces in isolation — no network,
-no real terminal. What follows is what those tests can't reach: things you have to actually run
-and watch. Do this before a release, or after touching `src/agent.rs` or anything under
-`src/tui/`.
+The nearly one hundred tests that live next to the code check individual pieces in isolation — no
+network, no real terminal. What follows is what those tests can't reach: things you have to
+actually run and watch. Do this before a release, or after touching `src/agent.rs` or anything
+under `src/tui/`.
 
 ## Prove it's actually read-only
 
@@ -42,6 +42,10 @@ Each of these deserves its own separate run:
   runs. Either way, the terminal should end up back in a normal, usable state — a visible cursor,
   no leftover prompt line or status line still sitting on screen — and whatever was already
   printed to scrollback should still be there afterward.
+- **Pasting.** Paste a multi-line snippet into the prompt. It should arrive as a single line with
+  the line breaks turned into spaces, and it should *not* submit itself partway through. Then quit
+  `fey` and paste something into your normal shell prompt: if you see stray characters like `200~`
+  around what you pasted, bracketed paste wasn't turned off on the way out.
 - **The model being unreachable.** Stop Ollama, or point `--ollama-url` somewhere that doesn't
   exist, then send a prompt. The error should show up in the scrollback, and the app should go
   back to a normal, ready-to-type state afterward — not get stuck.
