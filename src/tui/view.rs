@@ -105,10 +105,24 @@ pub(crate) fn render_message(lines: Vec<Line<'static>>, buf: &mut Buffer) {
     Text::from(lines).render(buf.area, buf);
 }
 
+/// Wraps `text` to `width`, keeping the line breaks it already contains.
+///
+/// Splitting on `'\n'` first is not a convenience: a newline is a control
+/// character, so `UnicodeWidthChar::width` reports no width for it and the
+/// per-character loop in `wrap_paragraph` would drop it silently, gluing the
+/// last word of one line onto the first word of the next.
 fn wrap_text(text: &str, width: u16) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
     }
+
+    text.split('\n')
+        .flat_map(|paragraph| wrap_paragraph(paragraph, width))
+        .collect()
+}
+
+/// Wraps a single newline-free paragraph. `width` must be non-zero.
+fn wrap_paragraph(text: &str, width: u16) -> Vec<String> {
     let width = width as usize;
 
     let mut lines = Vec::new();
@@ -259,6 +273,51 @@ mod tests {
         let lines = wrap_message(&message(Role::User, "aaa bbb ccc"), 8);
 
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn keeps_an_explicit_line_break_as_a_separate_line() {
+        let lines = plain_lines(&message(Role::Assistant, "first\nsecond"), 80);
+
+        assert_eq!(lines, vec!["Fey: first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn keeps_a_blank_line_between_paragraphs() {
+        let lines = plain_lines(&message(Role::Assistant, "one\n\ntwo"), 80);
+
+        assert_eq!(
+            lines,
+            vec!["Fey: one".to_string(), String::new(), "two".to_string()]
+        );
+    }
+
+    #[test]
+    fn wraps_each_line_of_a_list_independently() {
+        let lines = plain_lines(&message(Role::Assistant, "Items:\n- alpha\n- beta"), 80);
+
+        assert_eq!(
+            lines,
+            vec![
+                "Fey: Items:".to_string(),
+                "- alpha".to_string(),
+                "- beta".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn still_wraps_a_line_that_follows_a_line_break() {
+        let lines = plain_lines(&message(Role::Assistant, "hi\nabcdefghijk"), 10);
+
+        assert_eq!(
+            lines,
+            vec![
+                "Fey: hi".to_string(),
+                "abcdefghij".to_string(),
+                "k".to_string(),
+            ]
+        );
     }
 
     #[test]
