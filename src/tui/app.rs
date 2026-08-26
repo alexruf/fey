@@ -71,7 +71,12 @@ impl App {
 
         match key.code {
             KeyCode::Enter => self.submit(),
-            KeyCode::Char(c) if self.status == Status::Idle => {
+            // Only Shift may accompany a printable character. Without this
+            // guard, Ctrl-A or Alt-B arrive as `Char('a')`/`Char('b')` and get
+            // typed into the buffer as literal text.
+            KeyCode::Char(c)
+                if self.status == Status::Idle && is_plain_or_shifted(key.modifiers) =>
+            {
                 self.input.push(c);
                 Action::Edit
             }
@@ -132,6 +137,13 @@ impl App {
             text: "agent worker stopped".to_string(),
         })
     }
+}
+
+/// Whether these modifiers describe a character the user meant to type.
+///
+/// Anything beyond Shift (Ctrl, Alt, Super, …) is a command, not text.
+fn is_plain_or_shifted(modifiers: KeyModifiers) -> bool {
+    modifiers.difference(KeyModifiers::SHIFT).is_empty()
 }
 
 /// Renders an error together with every cause behind it.
@@ -310,6 +322,37 @@ mod tests {
             message.text,
             "failed to initialize workspace at \"/tmp/ws\": connection refused"
         );
+    }
+
+    #[test]
+    fn control_and_alt_combinations_never_reach_the_input_buffer() {
+        let mut app = App::new();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT));
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::SUPER));
+
+        assert_eq!(app.input(), "");
+    }
+
+    #[test]
+    fn shifted_characters_still_reach_the_input_buffer() {
+        let mut app = App::new();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('i')));
+
+        assert_eq!(app.input(), "Hi");
+    }
+
+    #[test]
+    fn a_rejected_combination_reports_no_edit() {
+        let mut app = App::new();
+
+        let action = app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+
+        assert_eq!(action, Action::None);
     }
 
     /// Mirrors how Rig's error types behave: each layer prints its own source
