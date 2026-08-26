@@ -115,7 +115,7 @@ impl App {
             },
             WorkerEvent::Failed(err) => Message {
                 role: Role::Error,
-                text: err.to_string(),
+                text: error_chain(&err),
             },
         }
     }
@@ -132,6 +132,32 @@ impl App {
             text: "agent worker stopped".to_string(),
         })
     }
+}
+
+/// Renders an error together with every cause behind it.
+///
+/// `Display` on a `thiserror` enum only describes its own layer — the useful
+/// detail (a refused connection, a missing model) hangs off `source()`. Without
+/// walking the chain, an unreachable Ollama server reaches the user as nothing
+/// but "agent turn failed".
+///
+/// Not every error type follows that convention though. Rig's do interpolate
+/// their own source into their `Display`, so appending each cause blindly
+/// repeats the same sentence — in the unreachable-server case, the same URL
+/// five times over. A cause is only added when it says something the message
+/// does not already contain.
+fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut rendered = err.to_string();
+    let mut cause = err.source();
+    while let Some(current) = cause {
+        let message = current.to_string();
+        if !rendered.contains(&message) {
+            rendered.push_str(": ");
+            rendered.push_str(&message);
+        }
+        cause = current.source();
+    }
+    rendered
 }
 
 #[cfg(test)]
@@ -267,5 +293,73 @@ mod tests {
         assert!(first.is_some());
         assert_eq!(first.unwrap().role, Role::Error);
         assert!(second.is_none());
+    }
+
+    #[test]
+    fn complete_reports_every_cause_behind_a_failure() {
+        let mut app = App::new();
+        let event = WorkerEvent::Failed(AgentError::Workspace {
+            path: std::path::PathBuf::from("/tmp/ws"),
+            source: Box::new(std::io::Error::other("connection refused")),
+        });
+
+        let message = app.complete(event);
+
+        assert_eq!(message.role, Role::Error);
+        assert_eq!(
+            message.text,
+            "failed to initialize workspace at \"/tmp/ws\": connection refused"
+        );
+    }
+
+    /// Mirrors how Rig's error types behave: each layer prints its own source
+    /// as part of its own message.
+    #[derive(Debug)]
+    struct Layer {
+        message: String,
+        cause: Option<Box<Layer>>,
+    }
+
+    impl Layer {
+        fn new(message: &str, cause: Option<Layer>) -> Self {
+            Self {
+                message: message.to_string(),
+                cause: cause.map(Box::new),
+            }
+        }
+    }
+
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.message)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.cause
+                .as_deref()
+                .map(|cause| cause as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    #[test]
+    fn error_chain_skips_a_cause_already_spelled_out_by_its_parent() {
+        let inner = Layer::new("connection refused", None);
+        let outer = Layer::new("request failed: connection refused", Some(inner));
+
+        assert_eq!(error_chain(&outer), "request failed: connection refused");
+    }
+
+    #[test]
+    fn error_chain_keeps_a_cause_that_adds_detail() {
+        let root = Layer::new("os error 61", None);
+        let middle = Layer::new("connection refused", Some(root));
+        let outer = Layer::new("request failed: connection refused", Some(middle));
+
+        assert_eq!(
+            error_chain(&outer),
+            "request failed: connection refused: os error 61"
+        );
     }
 }

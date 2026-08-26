@@ -41,7 +41,10 @@ pub enum AgentError {
     #[error("prompt must not be empty")]
     EmptyPrompt,
 
-    #[error("failed to initialize workspace at {path:?}: {source}")]
+    // No `{source}` here: every consumer renders the whole chain (the TUI via
+    // `error_chain`, `main` via anyhow's `Debug`), so interpolating the source
+    // into this message would print it twice.
+    #[error("failed to initialize workspace at {path:?}")]
     Workspace {
         path: PathBuf,
         #[source]
