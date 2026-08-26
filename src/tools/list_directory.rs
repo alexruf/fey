@@ -18,14 +18,14 @@ pub(crate) fn list_directory(
 ) -> Result<String, WorkspaceError> {
     let dir = workspace.resolve_dir(path)?;
 
-    let mut entries: Vec<(String, EntryKind)> = fs::read_dir(&dir)
+    let mut entries: Vec<(String, EntryKind)> = fs::read_dir(dir.as_path())
         .map_err(|source| WorkspaceError::Io {
-            path: dir.clone(),
+            path: dir.as_path().to_path_buf(),
             source,
         })?
         .map(|entry| {
             let entry = entry.map_err(|source| WorkspaceError::Io {
-                path: dir.clone(),
+                path: dir.as_path().to_path_buf(),
                 source,
             })?;
             let file_type = entry.file_type().map_err(|source| WorkspaceError::Io {

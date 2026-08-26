@@ -8,6 +8,30 @@ use thiserror::Error;
 
 pub(crate) const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
+/// A path that has already been checked against the sandbox, together with the
+/// metadata that check read.
+///
+/// Only `Workspace` can build one, because the fields are private to this
+/// module and every constructor path runs through `resolve`. That is what makes
+/// I2 (docs/architecture.md) a compiler guarantee instead of a convention a new
+/// tool has to remember: a function that wants to touch the filesystem has to
+/// ask for a `ResolvedPath`, and the only way to get one is to be checked.
+///
+/// Carrying the metadata also means the kind and size checks share the single
+/// `stat` the resolution already performed, so nothing can swap the file
+/// underneath between checking it and reading it.
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedPath {
+    path: PathBuf,
+    metadata: fs::Metadata,
+}
+
+impl ResolvedPath {
+    pub(crate) fn as_path(&self) -> &Path {
+        &self.path
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Workspace {
     root: PathBuf,
@@ -63,7 +87,7 @@ impl Workspace {
         Ok(Self { root: canonical })
     }
 
-    fn resolve(&self, path: &str) -> Result<PathBuf, WorkspaceError> {
+    fn resolve(&self, path: &str) -> Result<ResolvedPath, WorkspaceError> {
         if path.is_empty() {
             return Err(WorkspaceError::EmptyPath);
         }
@@ -94,13 +118,21 @@ impl Workspace {
             return Err(WorkspaceError::OutsideWorkspace(requested.to_path_buf()));
         }
 
-        Ok(canonical)
+        let metadata = fs::metadata(&canonical).map_err(|source| WorkspaceError::Io {
+            path: canonical.clone(),
+            source,
+        })?;
+
+        Ok(ResolvedPath {
+            path: canonical,
+            metadata,
+        })
     }
 
-    pub(crate) fn resolve_dir(&self, path: Option<&str>) -> Result<PathBuf, WorkspaceError> {
+    pub(crate) fn resolve_dir(&self, path: Option<&str>) -> Result<ResolvedPath, WorkspaceError> {
         let requested = path.unwrap_or(".");
         let resolved = self.resolve(requested)?;
-        if !resolved.is_dir() {
+        if !resolved.metadata.is_dir() {
             return Err(WorkspaceError::WrongKind {
                 path: PathBuf::from(requested),
                 expected: "directory",
@@ -110,17 +142,13 @@ impl Workspace {
         Ok(resolved)
     }
 
-    pub(crate) fn resolve_file(&self, path: &str) -> Result<PathBuf, WorkspaceError> {
+    pub(crate) fn resolve_file(&self, path: &str) -> Result<ResolvedPath, WorkspaceError> {
         let resolved = self.resolve(path)?;
-        let metadata = fs::metadata(&resolved).map_err(|source| WorkspaceError::Io {
-            path: resolved.clone(),
-            source,
-        })?;
-        if !metadata.is_file() {
+        if !resolved.metadata.is_file() {
             return Err(WorkspaceError::WrongKind {
                 path: PathBuf::from(path),
                 expected: "file",
-                actual: if metadata.is_dir() {
+                actual: if resolved.metadata.is_dir() {
                     "directory"
                 } else {
                     "non-regular file"
@@ -130,22 +158,20 @@ impl Workspace {
         Ok(resolved)
     }
 
-    pub(crate) fn read_utf8_file(&self, path: &Path) -> Result<String, WorkspaceError> {
-        let metadata = fs::metadata(path).map_err(|source| WorkspaceError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if metadata.len() > MAX_FILE_SIZE {
+    /// Reads a resolved file as UTF-8. Taking `ResolvedPath` rather than
+    /// `&Path` is the point: an unchecked path cannot be passed in at all.
+    pub(crate) fn read_utf8_file(&self, file: &ResolvedPath) -> Result<String, WorkspaceError> {
+        if file.metadata.len() > MAX_FILE_SIZE {
             return Err(WorkspaceError::TooLarge {
-                path: path.to_path_buf(),
+                path: file.path.clone(),
                 max: MAX_FILE_SIZE,
             });
         }
-        let bytes = fs::read(path).map_err(|source| WorkspaceError::Io {
-            path: path.to_path_buf(),
+        let bytes = fs::read(&file.path).map_err(|source| WorkspaceError::Io {
+            path: file.path.clone(),
             source,
         })?;
-        String::from_utf8(bytes).map_err(|_| WorkspaceError::NotUtf8(path.to_path_buf()))
+        String::from_utf8(bytes).map_err(|_| WorkspaceError::NotUtf8(file.path.clone()))
     }
 }
 
@@ -187,7 +213,7 @@ mod tests {
 
         let resolved = ws.resolve_dir(None).unwrap();
 
-        assert_eq!(resolved, fs::canonicalize(dir.path()).unwrap());
+        assert_eq!(resolved.as_path(), fs::canonicalize(dir.path()).unwrap());
     }
 
     #[test]
@@ -243,7 +269,7 @@ mod tests {
         let resolved = ws.resolve_file("sub/../sub/file.txt").unwrap();
 
         assert_eq!(
-            resolved,
+            resolved.as_path(),
             fs::canonicalize(dir.path().join("sub/file.txt")).unwrap()
         );
     }
@@ -316,9 +342,8 @@ mod tests {
         fs::write(&path, vec![b'a'; (MAX_FILE_SIZE + 1) as usize]).unwrap();
         let ws = workspace(&dir);
 
-        let err = ws
-            .read_utf8_file(&fs::canonicalize(&path).unwrap())
-            .unwrap_err();
+        let resolved = ws.resolve_file("big.txt").unwrap();
+        let err = ws.read_utf8_file(&resolved).unwrap_err();
 
         assert!(matches!(err, WorkspaceError::TooLarge { .. }));
     }
@@ -330,9 +355,8 @@ mod tests {
         fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
         let ws = workspace(&dir);
 
-        let err = ws
-            .read_utf8_file(&fs::canonicalize(&path).unwrap())
-            .unwrap_err();
+        let resolved = ws.resolve_file("invalid.txt").unwrap();
+        let err = ws.read_utf8_file(&resolved).unwrap_err();
 
         assert!(matches!(err, WorkspaceError::NotUtf8(_)));
     }
@@ -344,9 +368,8 @@ mod tests {
         fs::write(&path, "hello\nworld\n").unwrap();
         let ws = workspace(&dir);
 
-        let content = ws
-            .read_utf8_file(&fs::canonicalize(&path).unwrap())
-            .unwrap();
+        let resolved = ws.resolve_file("hello.txt").unwrap();
+        let content = ws.read_utf8_file(&resolved).unwrap();
 
         assert_eq!(content, "hello\nworld\n");
     }
