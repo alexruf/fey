@@ -8,7 +8,7 @@ mod read_file;
 use rig::tool::{ToolContext, ToolExecutionError};
 
 use crate::workspace::{Workspace, WorkspaceError};
-use list_directory::list_directory as list_directory_impl;
+use list_directory::{ListDirectoryError, list_directory as list_directory_impl};
 use read_file::{ReadFileError, read_file as read_file_impl};
 
 fn workspace_from_context(context: &ToolContext) -> Result<&Workspace, ToolExecutionError> {
@@ -39,14 +39,18 @@ fn map_workspace_error(err: WorkspaceError) -> ToolExecutionError {
 }
 
 #[rig::rig_tool(
-    description = "List the immediate children of a directory inside the workspace. Paths are workspace-relative; omit path for the workspace root."
+    description = "List the immediate children of a directory inside the workspace. Paths are workspace-relative; omit path for the workspace root. start_entry defaults to 1 and pages through directories with more entries than one call returns."
 )]
 pub(crate) fn list_directory(
     #[rig(context)] context: &mut ToolContext,
     path: Option<String>,
+    start_entry: Option<usize>,
 ) -> Result<String, ToolExecutionError> {
     let workspace = workspace_from_context(context)?;
-    list_directory_impl(workspace, path.as_deref()).map_err(map_workspace_error)
+    list_directory_impl(workspace, path.as_deref(), start_entry).map_err(|err| match err {
+        ListDirectoryError::ZeroStartEntry => ToolExecutionError::invalid_args(err.to_string()),
+        ListDirectoryError::Workspace(source) => map_workspace_error(source),
+    })
 }
 
 #[rig::rig_tool(
