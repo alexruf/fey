@@ -40,6 +40,8 @@ Each of these deserves its own separate run:
   still there.
 - **Wide characters.** Type a wide character like a CJK character, then backspace it. It should
   render and delete cleanly, with no crash.
+- **Tab-indented replies.** Ask the model to show a tab-indented code snippet, then check that
+  the indentation appears as four spaces in the terminal scrollback rather than disappearing.
 - **Resizing the window** mid-conversation shouldn't crash anything. Some visual glitches during
   the resize itself are a known, accepted rough edge (see ADR-0002) — just don't expect a crash.
 - **Ctrl-C.** Try it once while idle, and once while a prompt is still in flight, in two separate

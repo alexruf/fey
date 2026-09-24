@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::io;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -17,9 +18,8 @@ pub(crate) const MAX_FILE_SIZE: u64 = 1024 * 1024;
 /// tool has to remember: a function that wants to touch the filesystem has to
 /// ask for a `ResolvedPath`, and the only way to get one is to be checked.
 ///
-/// Carrying the metadata also means the kind and size checks share the single
-/// `stat` the resolution already performed, so nothing can swap the file
-/// underneath between checking it and reading it.
+/// The metadata lets `resolve_file` and `resolve_dir` check the entry kind.
+/// File size is checked again on the opened handle before reading.
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedPath {
     path: PathBuf,
@@ -161,16 +161,36 @@ impl Workspace {
     /// Reads a resolved file as UTF-8. Taking `ResolvedPath` rather than
     /// `&Path` is the point: an unchecked path cannot be passed in at all.
     pub(crate) fn read_utf8_file(&self, file: &ResolvedPath) -> Result<String, WorkspaceError> {
-        if file.metadata.len() > MAX_FILE_SIZE {
+        let io_err = |source| WorkspaceError::Io {
+            path: file.path.clone(),
+            source,
+        };
+        let opened = fs::File::open(&file.path).map_err(io_err)?;
+        let metadata = opened.metadata().map_err(io_err)?;
+        if !metadata.is_file() {
+            return Err(io_err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "resolved file is no longer a regular file",
+            )));
+        }
+        if metadata.len() > MAX_FILE_SIZE {
             return Err(WorkspaceError::TooLarge {
                 path: file.path.clone(),
                 max: MAX_FILE_SIZE,
             });
         }
-        let bytes = fs::read(&file.path).map_err(|source| WorkspaceError::Io {
-            path: file.path.clone(),
-            source,
-        })?;
+        // The file can grow after metadata(); never read past the limit.
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        opened
+            .take(MAX_FILE_SIZE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(io_err)?;
+        if bytes.len() as u64 > MAX_FILE_SIZE {
+            return Err(WorkspaceError::TooLarge {
+                path: file.path.clone(),
+                max: MAX_FILE_SIZE,
+            });
+        }
         String::from_utf8(bytes).map_err(|_| WorkspaceError::NotUtf8(file.path.clone()))
     }
 }
@@ -345,6 +365,20 @@ mod tests {
         let resolved = ws.resolve_file("big.txt").unwrap();
         let err = ws.read_utf8_file(&resolved).unwrap_err();
 
+        assert!(matches!(err, WorkspaceError::TooLarge { .. }));
+    }
+
+    #[test]
+    fn read_utf8_file_rejects_a_file_that_grows_after_resolution() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("growing.txt");
+        fs::write(&path, b"short").unwrap();
+        let ws = workspace(&dir);
+
+        let resolved = ws.resolve_file("growing.txt").unwrap();
+        fs::write(&path, vec![b'a'; (MAX_FILE_SIZE + 1) as usize]).unwrap();
+
+        let err = ws.read_utf8_file(&resolved).unwrap_err();
         assert!(matches!(err, WorkspaceError::TooLarge { .. }));
     }
 

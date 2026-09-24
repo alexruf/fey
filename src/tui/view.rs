@@ -159,7 +159,11 @@ fn wrap_paragraph(text: &str, width: u16) -> Vec<String> {
         *word_width = 0;
     };
 
-    for c in text.chars() {
+    // Terminal buffers cannot render tabs; expand them before measuring widths.
+    for c in text.chars().flat_map(|c| {
+        let count = if c == '\t' { 4 } else { 1 };
+        std::iter::repeat_n(if c == '\t' { ' ' } else { c }, count)
+    }) {
         if c.is_whitespace() {
             flush_word(
                 &mut line,
@@ -276,6 +280,21 @@ mod tests {
                 "\u{4e16}".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn preserves_tab_indentation_in_assistant_code() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 2));
+        render_message(
+            wrap_message(&message(Role::Assistant, "code:\n\tvalue"), 80),
+            &mut buffer,
+        );
+
+        let second_row: String = buffer.content()[80..89]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert_eq!(second_row, "    value");
     }
 
     #[test]
