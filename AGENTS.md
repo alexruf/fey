@@ -64,6 +64,42 @@ locked flake for those who prefer Nix.
    signatures against the installed version or docs instead of relying on
    training knowledge.
 
+### OpenSpec or Direct Implementation
+
+Rationale and examples: [`docs/README.md`](docs/README.md).
+
+- Direct path: small, well-understood work with clear scope, behavior, and
+  approach (typo, behavior-preserving local refactor, narrow fix restoring an
+  established contract). No OpenSpec change, proposal, design, tasks, or new
+  spec needed.
+- OpenSpec helps when persistent requirements, alternatives, coordination, or
+  multiple steps matter: nontrivial new capability, cross-cutting change,
+  ambiguous contract, migration. Judge by uncertainty and risk, not diff size;
+  a small diff to a security boundary is not automatically simple.
+- OpenSpec is a recommendation, never a gate. Recommend it at most once, with
+  the reason. Create OpenSpec artifacts only when the user asks or agrees. If
+  the user asked for implementation or declines, proceed directly; don't
+  re-raise, refuse, or delay.
+- Both paths keep every other rule in this file: investigation, test-first,
+  verification, quality gates, dependency approval, scope, documentation, ADRs.
+- Direct change touching behavior in `openspec/specs/`: keep the main spec
+  accurate; a fix restoring specified behavior needs no spec edit. Before
+  editing a main spec, check `openspec/changes/` for active delta specs on the
+  same requirement and update them too; sync/archive replaces the requirement
+  with the delta's version and would discard the direct edit. If settling the
+  requirements becomes substantial, switch to OpenSpec. Don't backfill specs
+  for unspecified features a small change touches.
+
+Document roles:
+
+- `openspec/specs/`: maintained behavior where specs exist; not full coverage.
+  Delta specs in a change: proposed, until synced.
+- Change proposal/design/tasks: one change's motivation, approach, trade-offs,
+  work. Completed artifacts or archiving prove neither implementation nor
+  architectural acceptance, and don't supersede an ADR.
+- `docs/decisions/` ADRs: accepted architectural decisions across changes.
+- `docs/architecture.md`: today's boundary and invariants.
+
 ### Implementation Cycle
 
 1. **Test** — Write a failing test first for behavior changes in production
@@ -156,6 +192,20 @@ Among correct candidates, prioritize in order:
   ADR receives is its status line changing to `Superseded by NNNN`. A change
   that alters an invariant in `docs/architecture.md` needs a new ADR
   explaining why, not just a doc edit.
+- ADR threshold is independent of OpenSpec: required for any invariant change
+  and for consequential architectural commitments (new or revised boundaries,
+  durable policies constraining later work, e.g. workspace access or
+  model-provider coupling). Not for routine algorithms, helper structure, or
+  feature-local choices; those go in the OpenSpec design, if any. An OpenSpec
+  change may need no ADR; a direct change may need one. If an accepted ADR
+  already covers the decision, reference it instead.
+- ADRs stay concise and self-contained: decision, enough context, consequences.
+  Alternatives, tasks, and feature requirements stay in change artifacts; the
+  design links to the ADR. An ADR never links an active change but may name
+  it; it may link an archived change as supporting context. Never edit an ADR
+  later to add an archive link. A proposal or design conflicting with an
+  accepted ADR must plan the new or superseding ADR and the
+  `docs/architecture.md` update.
 - **`AGENTS.md` is written for AI agents and stays dense and terse.**
   `README.md`, all other docs, and code comments are written primarily for
   humans. Write them as you would explain the reasoning to a colleague: use
