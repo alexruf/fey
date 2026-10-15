@@ -1,0 +1,4 @@
+skills:
+  ignoredSkills:
+    - "agents/openspec-*"
+    - "claude/openspec-*"
